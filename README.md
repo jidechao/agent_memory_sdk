@@ -23,6 +23,8 @@
 
 **Dreaming 五步**：`verify_notes`（拿笔记回查原始记录，推翻则改写）→ `consolidate`（去重合并）→ `build_wiki`（组织互链知识页 + 修链）→ `promote_index`（压缩顶层索引，penalized/stale 不得入顶）→ `demote`（下沉与清理）。
 
+📖 **时序详解**：[docs/memory-lifecycle.md](docs/memory-lifecycle.md) —— 每层什么时候写入、什么时候加载、由谁触发（含矩阵表与状态机）。
+
 ## 安装
 
 ```bash

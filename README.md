@@ -25,6 +25,8 @@
 
 📖 **时序详解**：[docs/memory-lifecycle.md](docs/memory-lifecycle.md) —— 每层什么时候写入、什么时候加载、由谁触发（含矩阵表与状态机）。
 
+📖 **冷启动集成**：[docs/cold-start-integration.md](docs/cold-start-integration.md) —— 零记忆起步的生产集成骨架、dream 调度策略、历史资料 bootstrap 与健康检查。
+
 ## 安装
 
 ```bash

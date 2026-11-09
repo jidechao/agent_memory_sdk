@@ -1,0 +1,27 @@
+# Secrets — never commit
+.env
+新建 文本文档.txt
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Runtime memory data & logs
+data/
+demo_output.txt
+*.log
+
+# Tooling state
+.omc/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Source article (copyright, large)
+*.mhtml
+article.txt
+.claude/

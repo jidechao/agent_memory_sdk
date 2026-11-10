@@ -25,3 +25,4 @@ Thumbs.db
 *.mhtml
 article.txt
 .claude/
+pytest_out.txt

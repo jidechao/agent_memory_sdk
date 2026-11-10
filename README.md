@@ -27,6 +27,8 @@
 
 📖 **冷启动集成**：[docs/cold-start-integration.md](docs/cold-start-integration.md) —— 零记忆起步的生产集成骨架、dream 调度策略、历史资料 bootstrap 与健康检查。
 
+📖 **质量记录**：[Codex 审查报告](docs/code-review-agent-memory-sdk-2026-11-09.md) + [修复总结](docs/code-review-fixes-2026-11-09.md)（21 项全修 + 修复过程新发现的 keeper 误删缺陷）。
+
 ## 安装
 
 ```bash

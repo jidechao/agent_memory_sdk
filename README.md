@@ -21,7 +21,7 @@
 负反馈（`harmful > helpful`）的记忆立即从检索中消失，并在下一轮 Dreaming 被降级或删除；
 失去全部来源笔记的 Wiki 页自动降级回笔记。所有升降级动作写入 L1 审计。
 
-**Dreaming 五步**：`verify_notes`（拿笔记回查原始记录，推翻则改写）→ `consolidate`（去重合并）→ `build_wiki`（组织互链知识页 + 修链）→ `promote_index`（压缩顶层索引，penalized/stale 不得入顶）→ `demote`（下沉与清理）。
+**Dreaming 五步**：`verify_notes`（拿笔记回查原始记录，推翻则改写，或落盘 `refuted` 保留证据）→ `consolidate`（去重合并）→ `build_wiki`（组织互链知识页 + 修链）→ `promote_index`（压缩顶层索引，penalized/stale/refuted 不得入顶）→ `demote`（下沉与清理）。
 
 📖 **时序详解**：[docs/memory-lifecycle.md](docs/memory-lifecycle.md) —— 每层什么时候写入、什么时候加载、由谁触发（含矩阵表与状态机）。
 
@@ -162,7 +162,7 @@ asyncio.run(main())
 
 ### 完整示例清单
 
-- `examples/demo.py` —— 跨会话学习循环（CL-Bench 复现：0.33 → 1.00，含错误记忆纠正）
+- `examples/demo.py` —— 跨会话学习循环（无记忆 0.00（诚实说不知道）→ 记忆加持 0.83，含错误记忆纠正）
 - `examples/integrate_host_agent.py` —— 手写宿主 agent loop 的最小集成
 - `examples/integrate_openai_agents_sdk.py` —— OpenAI Agents SDK（openai-agents）集成：`@function_tool` 包装记忆工具 + `Runner` 驱动工具循环
 
@@ -181,6 +181,6 @@ Embedding 走本地 Ollama（`/api/embed`，`trust_env=False` 不受系统代理
 ## 测试与验证
 
 ```bash
-./.venv/Scripts/python -m pytest tests/ -v   # 28 个单元测试（无需 LLM；dense/hybrid 需 Ollama）
+./.venv/Scripts/python -m pytest tests/ -v   # tests/ 下 51 个单元测试（无需 LLM；dense/hybrid 需 Ollama）
 ./.venv/Scripts/python examples/demo.py       # 端到端学习循环（调用 LLM，~3-5 分钟）
 ```

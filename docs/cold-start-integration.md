@@ -21,6 +21,7 @@ from agent_memory_sdk import MemorySystem, MemoryConfig
 
 # ① root 必须是固定持久目录，不是 tempfile —— 记忆的价值全在跨重启存活
 # ② 生产环境绝不传 wipe=True（那是 demo 用的）
+#    wipe=True 现自带路径守卫（拒绝 CWD/home/盘符根/深度<3 的路径），但生产仍建议不传
 mem = MemorySystem(root="/var/lib/myagent/memory")
 
 BASE_PROMPT = (

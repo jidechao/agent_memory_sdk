@@ -82,7 +82,9 @@
       │  └── wiki 失源降级回笔记 ◀┴────────────────────────────┘                 │
       │                                                                          │
       ├─ 闲置 N 轮 ─▶ note(stale) ── 再闲置 ─▶ 删除                               │
-      ├─ verify 推翻 ─▶ refuted ─▶ corrected(改写回 verified) 或 删除            │
+      ├─ verify 推翻 ─▶ refuted（落盘保留证据，不再直接删除）                 │
+      │                 ├─ 排除出检索 / 索引提升 / Wiki 组织                    │
+      │                 └─ lifecycle：refuted 且 penalized(harmful>helpful) 时删除 │
       └─ feedback 负反馈 harmful>helpful ─▶ 检索即时过滤 ─▶ refuted 时删除 ◀─────┘
 ```
 

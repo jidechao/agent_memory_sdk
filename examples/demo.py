@@ -4,8 +4,10 @@ Scenario (mirrors the CL-Bench setup from the article):
   A hidden rule base about a fictional internal system "Nova". The model
   cannot possibly know these rules — it can only learn them across sessions.
 
-  Session 1 : fresh agent, no memory -> guesses, fails, gets graded,
-              writes memory notes at session end (online write path).
+  Session 1 : fresh agent, no memory -> BASE_SYSTEM makes it honestly say
+              "I don't know" and identify information gaps; scores 0.00
+              without hallucination, gets graded, and writes memory notes
+              at session end (online write path).
   Dreaming  : offline maintenance -> verifies notes against raw transcripts,
               corrects refuted ones, dedupes, builds the wiki, compresses
               the top-level index, and demotes stale/harmful memories.

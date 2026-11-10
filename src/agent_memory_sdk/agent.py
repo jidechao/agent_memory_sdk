@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM = (
     "你是部署在企业内部的运维问答 Agent。回答必须简洁、确定。"
-    "如果你不知道某条内部规则，直接给出你的最佳猜测，不要回避。"
+    "不知道的内部规则就明确说不知道并指出信息缺口，不要编造。"
 )
 
 AGENTIC_SYSTEM_SUFFIX = (

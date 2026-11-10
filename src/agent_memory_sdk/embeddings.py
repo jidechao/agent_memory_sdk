@@ -42,6 +42,9 @@ class Embedder:
         resp.raise_for_status()
         return resp.json()["embeddings"]
 
+    def close(self) -> None:
+        self._client.close()
+
     @staticmethod
     def try_create(model_name: str | None = None,
                    base_url: str | None = None) -> "Embedder | None":

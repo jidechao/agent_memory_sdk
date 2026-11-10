@@ -15,17 +15,11 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 logger = logging.getLogger(__name__)
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 
 
 class ChatModel(Protocol):
@@ -148,6 +142,12 @@ class LLMClient:
             from openai import OpenAI
 
             load_dotenv(env_path or ".env")
+            missing = [k for k in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL",
+                                   "DEEPSEEK_MODEL") if not os.environ.get(k)]
+            if missing:
+                raise ValueError(
+                    f"LLM 默认后端缺少环境变量: {', '.join(missing)}。"
+                    f"请在 .env 中配置，或改用 client=/chat_fn= 注入自己的后端。")
             self.model = model or os.environ["DEEPSEEK_MODEL"]
             self._backend = _OpenAICompatibleBackend(
                 OpenAI(api_key=os.environ["DEEPSEEK_API_KEY"],

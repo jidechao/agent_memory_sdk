@@ -102,13 +102,13 @@ class Lifecycle:
         for page in self.wiki.list_pages():
             if not page.sources or any(s in existing for s in page.sources):
                 continue
+            # create() already persists status="unverified" — no redundant save.
             note = self.notes.create(
                 title=f"[降级] {page.title}",
                 body=page.body,
                 note_type="fact",
                 sources=(),
             )
-            self.notes.save(replace(note, status="unverified"))
             self.wiki.delete_page(page.slug)
             self._log("wiki_demoted",
                       f"wiki page {page.slug} demoted to note {note.note_id} "

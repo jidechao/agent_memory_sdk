@@ -22,9 +22,6 @@ from .tools import ToolCounters
 
 logger = logging.getLogger(__name__)
 
-INDEX_MAX_LINES = 200
-INDEX_MAX_BYTES = 25 * 1024
-
 
 @dataclass
 class MemoryMetrics:
@@ -44,7 +41,8 @@ class MemoryMetrics:
         return path / "history.jsonl"
 
     # ------------------------------------------------------------------ #
-    def snapshot(self, kind: str, extra: dict | None = None) -> dict:
+    def snapshot(self, kind: str, extra: dict | None = None,
+                 persist: bool = True) -> dict:
         """Take a snapshot after a session or dream cycle and persist it."""
         notes = self.notes.list()
         pages = self.wiki.list_pages()
@@ -54,7 +52,8 @@ class MemoryMetrics:
 
         ledger_totals = self.ledger.totals()
         delta_entries = self.ledger.entries[self._last_ledger_size:]
-        self._last_ledger_size = len(self.ledger.entries)
+        if persist:
+            self._last_ledger_size = len(self.ledger.entries)
         delta: dict[str, dict[str, float]] = {}
         for e in delta_entries:
             t = delta.setdefault(e.tag, {"calls": 0, "prompt": 0,
@@ -77,10 +76,10 @@ class MemoryMetrics:
                           "bytes": len(index_text.encode("utf-8")),
                           "budget_lines_pct": round(
                               100 * len(index_text.splitlines())
-                              / INDEX_MAX_LINES, 1),
+                              / self.injected.max_lines, 1),
                           "budget_bytes_pct": round(
                               100 * len(index_text.encode("utf-8"))
-                              / INDEX_MAX_BYTES, 1)},
+                              / self.injected.max_bytes, 1)},
             },
             "quality": {
                 "verified": verified,
@@ -101,8 +100,9 @@ class MemoryMetrics:
         }
         if extra:
             snap["extra"] = extra
-        with self.history_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(snap, ensure_ascii=False) + "\n")
+        if persist:
+            with self.history_path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(snap, ensure_ascii=False) + "\n")
         return snap
 
     def _dir_stats(self, name: str) -> dict:
@@ -116,7 +116,10 @@ class MemoryMetrics:
     # ------------------------------------------------------------------ #
     def report(self) -> dict:
         history = self.read_history()
-        latest = history[-1] if history else self.snapshot("report")
+        # No write side effects in a read path: when there is no history yet,
+        # compute a transient snapshot without persisting it.
+        latest = (history[-1] if history
+                  else self.snapshot("report", persist=False))
         return {
             "latest": latest,
             "trend": {

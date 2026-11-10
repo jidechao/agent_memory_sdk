@@ -121,6 +121,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+MAX_TOP_K = 20
+
+
 @dataclass
 class ToolCounters:
     """Usage counters consumed by the health-metrics layer."""
@@ -155,6 +158,9 @@ class ToolExecutor:
             return json.dumps({"error": f"unknown tool {name!r}"},
                               ensure_ascii=False)
         try:
+            if "top_k" in args:   # clamp untrusted (model-supplied) bounds
+                args = {**args,
+                        "top_k": max(1, min(int(args["top_k"]), MAX_TOP_K))}
             return json.dumps(handler(**args), ensure_ascii=False)
         except Exception as exc:  # noqa: BLE001 - tool errors go back to the LLM
             logger.warning("tool %s failed: %s", name, exc)
@@ -210,14 +216,18 @@ class ToolExecutor:
                 for p in self.wiki.list_pages()]
 
     def _tool_search_transcripts(self, query: str, top_k: int = 10) -> list[dict]:
+        """Most recent matching raw entries, newest first."""
         tokens = [t for t in re.findall(r"\w+", query) if len(t) > 1]
         matches = []
-        for session_id, entries in self.transcripts.read_all().items():
-            for e in entries:
+        sessions = sorted(self.transcripts.read_all().items(), reverse=True)
+        for session_id, entries in sessions:
+            for e in reversed(entries):
                 if any(t in e["content"] for t in tokens):
                     matches.append({"session": session_id, "kind": e["kind"],
                                     "content": e["content"][:300]})
-        return matches[-top_k:]
+                    if len(matches) >= top_k:
+                        return matches
+        return matches
 
     def _tool_feedback_memory(self, memory_id: str, helpful: bool,
                               reason: str = "") -> dict:

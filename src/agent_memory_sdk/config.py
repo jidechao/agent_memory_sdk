@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .retrieval import RetrievalConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -29,10 +32,20 @@ class MemoryConfig:
         return MemoryConfig(
             root=Path(root or os.environ.get("MEMORY_ROOT", "./memory_data")),
             retrieval=RetrievalConfig.from_env(),
-            index_max_lines=int(os.environ.get("MEMORY_INDEX_MAX_LINES", "200")),
-            index_max_bytes=int(os.environ.get("MEMORY_INDEX_MAX_BYTES",
-                                               str(25 * 1024))),
-            stale_after_dreams=int(os.environ.get("MEMORY_STALE_AFTER_DREAMS",
-                                                  "2")),
-            max_tool_rounds=int(os.environ.get("MEMORY_MAX_TOOL_ROUNDS", "6")),
+            index_max_lines=_int_env("MEMORY_INDEX_MAX_LINES", 200),
+            index_max_bytes=_int_env("MEMORY_INDEX_MAX_BYTES", 25 * 1024),
+            stale_after_dreams=_int_env("MEMORY_STALE_AFTER_DREAMS", 2),
+            max_tool_rounds=_int_env("MEMORY_MAX_TOOL_ROUNDS", 6),
         )
+
+
+def _int_env(name: str, default: int) -> int:
+    """Env var to int with a sane fallback instead of a bare ValueError."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("invalid %s=%r, using default %d", name, raw, default)
+        return default

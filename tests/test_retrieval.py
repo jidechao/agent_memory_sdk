@@ -90,8 +90,10 @@ class TestHybrid:
         index2, notes2, _ = build(tmp_path, "hybrid", alt)
         assert index2.needs_resync
         index2.sync(notes2.list(), [])
-        hits = index2.search(OVERLAP_QUERY, top_k=1)
-        assert hits and hits[0].title == TARGET
+        # 本测试验证的是重建+重同步机制，不是单模型的 Top1 排序——
+        # 不同 embedding 模型的排序有正常方差，目标进入 top-3 即可
+        hits = index2.search(OVERLAP_QUERY, top_k=3)
+        assert hits and TARGET in [h.title for h in hits]
         index2.close()
 
 

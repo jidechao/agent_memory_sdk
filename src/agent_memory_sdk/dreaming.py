@@ -42,11 +42,12 @@ class Dreaming:
     def verify_notes(self) -> list[dict]:
         """Re-validate each unverified note against the raw transcripts."""
         report: list[dict] = []
-        evidence = json.dumps(self.transcripts.read_all(), ensure_ascii=False)
         # Keep the prompt bounded: graded entries carry the strongest signal.
-        graded = [e for sess in self.transcripts.read_all().values()
+        all_sessions = self.transcripts.read_all()
+        graded = [e for sess in all_sessions.values()
                   for e in sess if e["kind"] in ("grade", "feedback")]
-        evidence_short = json.dumps(graded, ensure_ascii=False) or evidence
+        evidence_short = json.dumps(graded, ensure_ascii=False) or \
+            json.dumps(all_sessions, ensure_ascii=False)
 
         for note in self.notes.list():
             if note.status == "verified":
@@ -83,8 +84,12 @@ class Dreaming:
                                    "uses_before_correction": uses_before,
                                    "reason": data.get("reason", "")})
                 else:
-                    self.notes.delete(note.note_id)
-                    report.append({"note": note.title, "action": "deleted",
+                    # No fix available: persist the refuted state (with its
+                    # evidence trail) instead of silently deleting — the
+                    # refuted count feeds the accuracy metric, and lifecycle
+                    # deletes it only once it is also penalized by feedback.
+                    self.notes.save(replace(note, status="refuted"))
+                    report.append({"note": note.title, "action": "refuted",
                                    "uses_before_correction": uses_before,
                                    "reason": data.get("reason", "")})
             else:
@@ -118,6 +123,7 @@ class Dreaming:
         by_id = {n.note_id: n for n in notes}
         report: list[dict] = []
         merged_away: set[str] = set()
+        keepers: set[str] = set()
         for group in data.get("merge_groups", []):
             members = [by_id[i] for i in group if i in by_id and i not in merged_away]
             if len(members) < 2:
@@ -128,8 +134,12 @@ class Dreaming:
                 tag="consolidate",
             )
             keeper = max(members, key=lambda m: m.uses)
+            keepers.add(keeper.note_id)
             self.notes.save(replace(
-                keeper, body=merged_body, uses=sum(m.uses for m in members),
+                keeper, body=merged_body,
+                uses=sum(m.uses for m in members),
+                helpful=sum(m.helpful for m in members),
+                harmful=sum(m.harmful for m in members),
                 sources=tuple(sorted({s for m in members for s in m.sources})),
             ))
             for m in members:
@@ -139,7 +149,9 @@ class Dreaming:
             report.append({"action": "merged", "into": keeper.title,
                            "from": [m.title for m in members]})
         for nid in data.get("delete_ids", []):
-            if nid in by_id and nid not in merged_away:
+            # A merge keeper must never be deleted in the same cycle — the LLM
+            # occasionally proposes both, which would silently lose knowledge.
+            if nid in by_id and nid not in merged_away and nid not in keepers:
                 self.notes.delete(nid)
                 report.append({"action": "deleted-stale", "note": by_id[nid].title})
         return report
@@ -169,30 +181,48 @@ class Dreaming:
             return []
 
         by_id = {n.note_id: n for n in notes}
-        all_slugs = [p["slug"] for p in data.get("pages", [])]
         report: list[dict] = []
+        # Sanitize every LLM-proposed slug before it touches the filesystem.
+        specs = []
         for spec in data.get("pages", []):
+            slug = WikiStore.sanitize_slug(str(spec.get("slug", "")))
+            title = str(spec.get("title", "")).strip()
+            if not slug or not title:
+                report.append({"action": "wiki-page-skipped",
+                               "reason": f"invalid slug/title in {spec!r}"})
+                continue
+            specs.append((slug, title, spec))
+        all_slugs = [s for s, _, _ in specs]
+
+        existing = {p.slug: p for p in self.wiki.list_pages()}
+        for slug, title, spec in specs:
             members = [by_id[i] for i in spec.get("note_ids", []) if i in by_id]
             if not members:
                 continue
-            other = [s for s in all_slugs if s != spec["slug"]]
+            source_ids = tuple(sorted(m.note_id for m in members))
+            # Incremental update: skip pages whose slug AND source set are
+            # unchanged — rebuilding the whole wiki every cycle is churn.
+            old = existing.get(slug)
+            if old and tuple(sorted(old.sources)) == source_ids:
+                report.append({"action": "wiki-page-kept", "slug": slug})
+                continue
+            other = [s for s in all_slugs if s != slug]
             body = self.llm.chat(
                 system=(
                     "撰写一页 Wiki 正文（Markdown）：提炼稳定概念、规则和证据位置，"
                     "不要照抄。提及相关主题时使用 [[slug]] 链接，"
                     f"可链接的页面有：{other}。只输出正文。"
                 ),
-                user=(f"页面：{spec['title']}\n要点：{spec.get('outline', '')}\n"
+                user=(f"页面：{title}\n要点：{spec.get('outline', '')}\n"
                       f"素材：\n" + "\n---\n".join(
                           f"{m.title}（来源会话 {','.join(m.sources) or 'n/a'}）: {m.body}"
                           for m in members)),
                 tag="wiki",
             )
             self.wiki.save_page(WikiPage(
-                slug=spec["slug"], title=spec["title"], body=body,
-                sources=tuple(m.note_id for m in members),
+                slug=slug, title=title, body=body, sources=source_ids,
             ))
-            report.append({"action": "wiki-page", "slug": spec["slug"],
+            report.append({"action": "wiki-page", "slug": slug,
                            "from_notes": [m.title for m in members]})
 
         # Repair broken cross-page links (link-level hole fixing).
@@ -250,13 +280,15 @@ class Dreaming:
         by_id = {n.note_id: n for n in notes}
         lines = ["# Memory Index (auto-loaded; details live in notes/ and wiki/)",
                  ""]
+        written = 0
         for nid in ids[:top_k]:
             n = by_id.get(nid)
             if n:
                 hook = re.sub(r"\s+", " ", n.body)[:80]
                 lines.append(f"- [{n.title}](notes/{n.note_id}.md) — {hook}")
+                written += 1
         self.injected.write_index(lines)
-        return {"index_lines": len(lines), "promoted": len(ids[:top_k])}
+        return {"index_lines": len(lines), "promoted": written}
 
     # ------------------------------------------------------------------ #
     def run(self) -> dict:

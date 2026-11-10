@@ -1,0 +1,32 @@
+.....................................F...........                        [100%]
+================================== FAILURES ===================================
+_________________ TestHybrid.test_model_switch_rebuilds_index _________________
+
+self = <test_retrieval.TestHybrid object at 0x00000211B2237E50>
+tmp_path = WindowsPath('C:/Users/40864/AppData/Local/Temp/pytest-of-40864/pytest-1260/test_model_switch_rebuilds_ind0')
+
+    def test_model_switch_rebuilds_index(self, tmp_path):
+        other = {"bge-m3": "qwen3-embedding:0.6b",
+                 "qwen3-embedding:0.6b": "bge-m3"}.get(
+                     EMBEDDER.model_name, "qwen3-embedding:0.6b")
+        try:
+            alt = Embedder(other)
+        except Exception:
+            pytest.skip(f"alternate model {other} not installed")
+        index, notes, _ = build(tmp_path, "hybrid", EMBEDDER)
+        assert not index.needs_resync
+        index.close()
+        index2, notes2, _ = build(tmp_path, "hybrid", alt)
+        assert index2.needs_resync
+        index2.sync(notes2.list(), [])
+        hits = index2.search(OVERLAP_QUERY, top_k=1)
+>       assert hits and hits[0].title == TARGET
+E       AssertionError: assert ([RetrievalHit(ref_id='aed3b08a', layer='note', title='回滚超时', score=0.03226645663380623)] and '回滚超时' == '部署窗口规则'
+E         
+E         - 部署窗口规则
+E         + 回滚超时)
+
+tests\test_retrieval.py:94: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_retrieval.py::TestHybrid::test_model_switch_rebuilds_index
+1 failed, 48 passed in 26.56s

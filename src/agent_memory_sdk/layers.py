@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
+# Wiki slugs come from LLM output — they must never become a path primitive.
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
 
 # --------------------------------------------------------------------------- #
@@ -59,8 +61,15 @@ class TranscriptStore:
         path = self.root / f"{session_id}.jsonl"
         if not path.exists():
             return []
-        return [json.loads(line) for line in
-                path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        entries = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                logger.error("skipping corrupt transcript line in %s", path.name)
+        return entries
 
     def read_all(self) -> dict[str, list[dict]]:
         return {p.stem: self.read_session(p.stem)
@@ -154,13 +163,23 @@ class NotesStore:
             self.index.delete_note(note_id)
 
     def list(self) -> list[MemoryNote]:
-        return [MemoryNote.from_markdown(p.read_text(encoding="utf-8"))
-                for p in sorted(self.root.glob("*.md"))]
+        """All notes. A single corrupt file must not take down the store —
+        corrupt files are skipped (and logged), never fatal."""
+        notes = []
+        for p in sorted(self.root.glob("*.md")):
+            try:
+                notes.append(MemoryNote.from_markdown(
+                    p.read_text(encoding="utf-8")))
+            except (ValueError, json.JSONDecodeError) as exc:
+                logger.error("skipping corrupt note file %s: %s", p.name, exc)
+        return notes
 
     def mark_used(self, note_id: str) -> None:
-        for n in self.list():
-            if n.note_id == note_id:
-                self.save(replace(n, uses=n.uses + 1))
+        path = self._path(note_id)
+        if not path.exists():
+            return
+        n = MemoryNote.from_markdown(path.read_text(encoding="utf-8"))
+        self.save(replace(n, uses=n.uses + 1))
 
     def search(self, query: str, top_k: int = 5) -> list[MemoryNote]:
         """Semantic/hybrid retrieval via zvec when an index is attached.
@@ -209,26 +228,47 @@ class WikiStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.index = index
 
+    def _slug_path(self, slug: str) -> Path:
+        """Slugs are untrusted (LLM output / tool input) — whitelist them
+        before they ever touch the filesystem (path-traversal guard)."""
+        if not SLUG_RE.fullmatch(slug):
+            raise ValueError(f"invalid wiki slug: {slug!r}")
+        return self.root / f"{slug}.md"
+
+    @staticmethod
+    def sanitize_slug(raw: str) -> str:
+        """Best-effort cleanup of an LLM-proposed slug; '' if unsalvageable."""
+        slug = re.sub(r"[^a-z0-9-]+", "-", raw.lower()).strip("-")
+        slug = re.sub(r"-{2,}", "-", slug)[:64].strip("-")
+        return slug if SLUG_RE.fullmatch(slug) else ""
+
     def save_page(self, page: WikiPage) -> None:
         fm = {"title": page.title, "sources": list(page.sources),
               "updated": page.updated}
         text = f"---\n{json.dumps(fm, ensure_ascii=False, indent=2)}\n---\n{page.body}\n"
-        (self.root / f"{page.slug}.md").write_text(text, encoding="utf-8")
+        self._slug_path(page.slug).write_text(text, encoding="utf-8")
         if self.index:
             self.index.upsert_page(page)
 
     def delete_page(self, slug: str) -> None:
-        (self.root / f"{slug}.md").unlink(missing_ok=True)
+        self._slug_path(slug).unlink(missing_ok=True)
         if self.index:
             self.index.delete_page(slug)
 
     def get_page(self, slug: str) -> WikiPage | None:
-        path = self.root / f"{slug}.md"
+        if not SLUG_RE.fullmatch(slug):
+            return None
+        path = self._slug_path(slug)
         if not path.exists():
             return None
         text = path.read_text(encoding="utf-8")
         m = FRONTMATTER_RE.match(text)
-        fm = json.loads(m.group(1)) if m else {}
+        fm: dict = {}
+        if m:
+            try:
+                fm = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                logger.error("corrupt frontmatter in wiki page %s", slug)
         return WikiPage(slug=slug, title=fm.get("title", slug),
                         body=text[m.end():].strip() if m else text,
                         sources=tuple(fm.get("sources", [])),
@@ -265,23 +305,26 @@ class WikiStore:
 class InjectedContext:
     """MEMORY.md: the only layer auto-loaded at session start.
 
-    Hard budget (mirrors Claude Code's auto-memory): max 200 lines / 25 KB.
-    The top level is a directory of pointers, not a warehouse — details stay
-    in the lower layers and are pulled on demand.
+    Hard budget (mirrors Claude Code's auto-memory): default max 200 lines /
+    25 KB, configurable via MemoryConfig. The top level is a directory of
+    pointers, not a warehouse — details stay in the lower layers.
     """
 
-    MAX_LINES = 200
-    MAX_BYTES = 25 * 1024
+    DEFAULT_MAX_LINES = 200
+    DEFAULT_MAX_BYTES = 25 * 1024
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, max_lines: int = DEFAULT_MAX_LINES,
+                 max_bytes: int = DEFAULT_MAX_BYTES):
         self.path = root / "MEMORY.md"
+        self.max_lines = max_lines
+        self.max_bytes = max_bytes
 
     def write_index(self, lines: list[str]) -> None:
         text = "\n".join(lines).strip() + "\n"
         # Enforce the budget exactly like the real design does.
-        raw = text.encode("utf-8")[: self.MAX_BYTES]
+        raw = text.encode("utf-8")[: self.max_bytes]
         text = raw.decode("utf-8", errors="ignore")
-        text = "\n".join(text.splitlines()[: self.MAX_LINES]) + "\n"
+        text = "\n".join(text.splitlines()[: self.max_lines]) + "\n"
         self.path.write_text(text, encoding="utf-8")
         logger.info("injected index written: %d lines, %d bytes",
                     len(text.splitlines()), len(text.encode("utf-8")))
@@ -290,6 +333,6 @@ class InjectedContext:
         if not self.path.exists():
             return ""
         text = self.path.read_text(encoding="utf-8")
-        raw = text.encode("utf-8")[: self.MAX_BYTES]
+        raw = text.encode("utf-8")[: self.max_bytes]
         text = raw.decode("utf-8", errors="ignore")
-        return "\n".join(text.splitlines()[: self.MAX_LINES])
+        return "\n".join(text.splitlines()[: self.max_lines])

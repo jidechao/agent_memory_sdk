@@ -44,8 +44,8 @@ class MemorySystem:
                  env_path: str | None = None,
                  wipe: bool = False):
         self.config = config or MemoryConfig.from_env(root)
-        if wipe and self.config.root.exists():
-            shutil.rmtree(self.config.root)
+        if wipe:
+            self._guarded_wipe()
         self.config.root.mkdir(parents=True, exist_ok=True)
 
         # LLM backend: injected client / callable, or .env default
@@ -55,14 +55,18 @@ class MemorySystem:
 
         # Retrieval index (degrades to FTS when no embedder is available)
         rc = self.config.retrieval
-        self.embedder = Embedder.try_create() if rc.mode != "fts" else None
+        self.embedder = Embedder.try_create(
+            rc.embedding_model, rc.ollama_base_url) if rc.mode != "fts" else None
         self.index = ZvecMemoryIndex(self.config.root, rc, self.embedder)
 
         # The four layers
         self.transcripts = TranscriptStore(self.config.root)
         self.notes = NotesStore(self.config.root, index=self.index)
         self.wiki = WikiStore(self.config.root, index=self.index)
-        self.injected = InjectedContext(self.config.root)
+        self.injected = InjectedContext(
+            self.config.root,
+            max_lines=self.config.index_max_lines,
+            max_bytes=self.config.index_max_bytes)
         if self.index.needs_resync:
             self.index.sync(self.notes.list(), self.wiki.list_pages())
 
@@ -138,8 +142,23 @@ class MemorySystem:
     def health(self) -> dict:
         return self.metrics.report()
 
+    def _guarded_wipe(self) -> None:
+        """wipe=True deletes the memory root — guard against catastrophic
+        misconfiguration (root pointing at CWD, home, or a filesystem root)."""
+        root = self.config.root.resolve()
+        forbidden = {Path.cwd().resolve(), Path.home().resolve(),
+                     Path(root.anchor)}
+        if root in forbidden or len(root.parts) < 3:
+            raise ValueError(
+                f"refusing to wipe suspicious memory root: {root} "
+                f"(must be a dedicated directory at least 2 levels deep)")
+        if root.exists():
+            shutil.rmtree(root)
+
     def close(self) -> None:
         self.index.close()
+        if self.embedder is not None:
+            self.embedder.close()
 
 
 def _summarize(report: dict) -> dict:

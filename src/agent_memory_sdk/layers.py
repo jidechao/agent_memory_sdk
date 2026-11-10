@@ -191,7 +191,9 @@ class NotesStore:
             hits = self.index.search(query, top_k=top_k * 2, layers=("note",))
             by_id = {n.note_id: n for n in self.list()}
             notes = [by_id[h.ref_id] for h in hits
-                     if h.ref_id in by_id and not by_id[h.ref_id].is_penalized]
+                     if h.ref_id in by_id
+                     and not by_id[h.ref_id].is_penalized
+                     and by_id[h.ref_id].status != "refuted"]
             return notes[:top_k]
         return self._search_keywords(query, top_k)
 
@@ -200,7 +202,7 @@ class NotesStore:
         q_tokens = set(re.findall(r"\w+", query.lower()))
         scored = []
         for n in self.list():
-            if n.is_penalized:
+            if n.is_penalized or n.status == "refuted":
                 continue
             text = f"{n.title} {n.body}".lower()
             score = sum(text.count(t) for t in q_tokens if len(t) > 1)

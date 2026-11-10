@@ -180,16 +180,20 @@ class ToolExecutor:
         out = []
         for h in hits:
             snippet = ""
+            filtered = False
             if h.layer == "note":
                 for n in self.notes.list():
                     if n.note_id == h.ref_id:
-                        if n.is_penalized:
-                            continue
+                        if n.is_penalized or n.status == "refuted":
+                            filtered = True
+                            break
                         snippet = n.body[:200]
                         break
             else:
                 page = self.wiki.get_page(h.ref_id)
                 snippet = (page.body[:200] if page else "")
+            if filtered:
+                continue
             out.append({"id": h.ref_id, "layer": h.layer, "title": h.title,
                         "score": round(h.score, 4), "snippet": snippet})
         return out

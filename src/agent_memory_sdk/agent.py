@@ -79,7 +79,7 @@ class MemoryAgent:
             for h in hits:
                 if h.layer == "note" and h.ref_id in notes_by_id and note_hits < top_k:
                     n = notes_by_id[h.ref_id]
-                    if n.is_penalized:
+                    if n.is_penalized or n.status == "refuted":
                         continue
                     self.notes.mark_used(n.note_id)
                     parts.append(f"[笔记:{n.title} / {n.status}] {n.body}")

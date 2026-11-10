@@ -19,7 +19,7 @@ from agent_memory_sdk.layers import (NotesStore, TranscriptStore,
                                      WikiPage, WikiStore)
 from agent_memory_sdk.lifecycle import Lifecycle
 from agent_memory_sdk.llm import LLMClient
-from agent_memory_sdk.retrieval import RetrievalConfig
+from agent_memory_sdk.retrieval import RetrievalConfig, RetrievalHit
 from agent_memory_sdk.tools import MAX_TOP_K, ToolExecutor
 
 
@@ -142,6 +142,63 @@ class TestRefutedPersistence:  # P1-2
         report = lc.demote()
         assert any(a["action"] == "note->deleted" for a in report)
         assert notes.list() == []
+
+
+class TestRefutedRetrievalFiltering:
+    def test_refuted_note_excluded_from_search_promotion_and_wiki(self, tmp_path):
+        from agent_memory_sdk.dreaming import Dreaming
+        from agent_memory_sdk.layers import InjectedContext
+
+        notes = NotesStore(tmp_path)
+        good = notes.create("正确规则", "正确内容", "rule")
+        refuted = notes.create("错误规则", "错误内容", "rule")
+        refuted = notes.save(replace(refuted, status="refuted"))
+
+        # Both the lexical fallback and an index-backed search must filter it.
+        assert [n.note_id for n in notes.search("内容")] == [good.note_id]
+
+        class StubIndex:
+            def search(self, query, top_k=5, layers=("note", "wiki")):
+                return [RetrievalHit(n.note_id, "note", n.title, 1.0)
+                        for n in notes.list()][:top_k]
+
+        index = StubIndex()
+        notes.index = index
+        assert [n.note_id for n in notes.search("内容")] == [good.note_id]
+
+        transcripts = TranscriptStore(tmp_path)
+        wiki = WikiStore(tmp_path)
+        executor = ToolExecutor(
+            notes, wiki, transcripts,
+            Lifecycle(notes, wiki, transcripts), index=index,
+        )
+        hits = executor._tool_search_memory("内容", layer="note")
+        assert [h["id"] for h in hits] == [good.note_id]
+
+        wiki_catalogs = []
+
+        def chat(system, user):
+            if "ranked_ids" in system:
+                # Even a stale/invalid LLM ranking cannot reintroduce refuted.
+                return json.dumps(
+                    {"ranked_ids": [refuted.note_id, good.note_id]})
+            wiki_catalogs.append(user)
+            return '{"pages": []}'
+
+        injected = InjectedContext(tmp_path)
+        dreaming = Dreaming(LLMClient(chat_fn=chat), transcripts, notes, wiki,
+                            injected)
+        dreaming.promote_index()
+        memory_index = injected.load()
+        assert good.title in memory_index
+        assert refuted.title not in memory_index
+        assert refuted.note_id not in memory_index
+
+        dreaming.build_wiki()
+        assert len(wiki_catalogs) == 1
+        assert good.title in wiki_catalogs[0]
+        assert refuted.title not in wiki_catalogs[0]
+        assert refuted.note_id not in wiki_catalogs[0]
 
 
 class TestConsolidateKeeperProtection:  # demo 回归暴露的缺陷

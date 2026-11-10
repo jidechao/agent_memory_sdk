@@ -160,7 +160,7 @@ class Dreaming:
     # 3. Wiki: a knowledge map, then repair its links
     # ------------------------------------------------------------------ #
     def build_wiki(self) -> list[dict]:
-        notes = self.notes.list()
+        notes = [n for n in self.notes.list() if n.status != "refuted"]
         if not notes:
             return []
         catalog = "\n".join(
@@ -253,9 +253,9 @@ class Dreaming:
     # 4. Promote the top layer: an index, not a warehouse
     # ------------------------------------------------------------------ #
     def promote_index(self, top_k: int = 10) -> dict:
-        # Penalized (harmful>helpful) and stale notes never reach the top layer.
+        # Penalized (harmful>helpful), stale, and refuted notes never reach L4.
         notes = [n for n in self.notes.list()
-                 if not n.is_penalized and n.status != "stale"]
+                 if not n.is_penalized and n.status not in ("stale", "refuted")]
         if not notes:
             return {"index_lines": 0}
         catalog = "\n".join(
